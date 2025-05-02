@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from models import Base, ToDo
 from database import engine, SessionLocal
+from routers.auth import verify_token
 
 
 router = APIRouter(
@@ -30,40 +31,66 @@ def get_db():
     finally:
         db.close()
 
-db_dependency = Annotated[Session, Depends(get_db)]
+db_dependency   = Annotated[Session, Depends(get_db)]
+user_dependency = Annotated[dict, Depends(verify_token)]
 
 
+@router.get("/", 
+            status_code=status.HTTP_200_OK)
+async def get_all_todo(user:user_dependency, 
+                       db: db_dependency):
+    
+    if user is None:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                             detail="User not authenticated")
+    
+    return db.query(ToDo).filter(ToDo.owner_id == user.get("id")).all()
 
-@router.get("/get_all", status_code=status.HTTP_200_OK)
-async def get_all_todo(db: db_dependency):
-    return db.query(ToDo).all()
 
-
-@router.get("/get/{todo_id}", status_code=status.HTTP_200_OK)
+@router.get("/todo/{todo_id}", 
+            status_code=status.HTTP_200_OK)
 async def get_todo(db: db_dependency, 
+                   user:user_dependency,
                     todo_id: int = Path(gt=0)):
-    todo = db.query(ToDo).filter(ToDo.id == todo_id).first()
+    
+    if user is None:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                             detail="User not authenticated")
+    
+    todo = db.query(ToDo).filter(ToDo.id == todo_id).filter(ToDo.owner_id == user.get("id")).first()
+    
     if not todo: 
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Todo not found")    
     return todo
 
 
-@router.post("/create", status_code=status.HTTP_201_CREATED)
-async def create_todo(todo: ToDoRequest, 
-                      db: db_dependency):
-    todo = ToDo(**todo) # .dict()
+@router.post("/create", 
+             status_code=status.HTTP_201_CREATED)
+async def create_todo(todo: ToDoRequest,
+                        user:user_dependency, 
+                        db: db_dependency):
+    if user is None:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                             detail="User not authenticated")
+    
+    todo = ToDo(**todo, owner_id=user.get("id")) # .dict()
     db.add(todo)
     db.commit()
     db.refresh(todo)
     return todo
 
 
-@router.put("/update/{todo_id}", status_code=status.HTTP_200_OK)
+@router.put("/todo/{todo_id}", status_code=status.HTTP_200_OK)
 async def update_todo(todo_request: ToDoRequest, 
+                      user:user_dependency,
                       db: db_dependency, 
                       todo_id: int = Path(gt=0)):
     
-    todo = db.query(ToDo).filter(ToDo.id == todo_id).first()
+    if user is None:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                             detail="User not authenticated")
+    
+    todo = db.query(ToDo).filter(ToDo.id == todo_id).filter(ToDo.owner_id == user.get("id")).first()
     if not todo:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Todo not found")
     for key, value in todo_request.dict().items():
@@ -73,11 +100,15 @@ async def update_todo(todo_request: ToDoRequest,
     return todo
 
 
-# 204 No Content dönebilir
-@router.delete("/delete/{todo_id}", status_code=status.HTTP_200_OK)
+@router.delete("/todo/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_todo(db: db_dependency, 
+                      user:user_dependency,
                        todo_id: int = Path(gt=0)):
-    todo = db.query(ToDo).filter(ToDo.id == todo_id).first()
+    if user is None:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
+                             detail="User not authenticated")
+    
+    todo = db.query(ToDo).filter(ToDo.id == todo_id).filter(ToDo.owner_id == user.get("id")).first()
     if not todo:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Todo not found")
     db.delete(todo)
