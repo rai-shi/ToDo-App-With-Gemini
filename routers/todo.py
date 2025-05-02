@@ -6,10 +6,22 @@ from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 
+import markdown
+from bs4 import BeautifulSoup
+
+import os 
+from dotenv import load_dotenv
+import google.generativeai as genai 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, AIMessage
+
 from models import Base, ToDo
 from database import engine, SessionLocal
 from routers.auth import verify_token
 
+
+load_dotenv()
+GOOGLE_API_KEY  = os.getenv("GOOGLE_API_KEY")
 
 router = APIRouter(
     tags=["Todo"],
@@ -42,6 +54,30 @@ def redirect_to_login():
                                          status_code=status.HTTP_302_FOUND)
     redirect_response.delete_cookie("access_token")
     return redirect_response
+
+
+def markdown_to_html(markdown_text: str):
+
+    html = markdown.markdown(markdown_text)
+    soup = BeautifulSoup(html, "html.parser")
+    parsed_text = soup.get_text()
+    return parsed_text
+
+
+def generate_description(desc : str):
+    genai.configure(api_key=GOOGLE_API_KEY)
+    llm = ChatGoogleGenerativeAI(model="gemini-pro", 
+                                 temperature=0.5)
+    
+    response = llm.invoke(
+        [
+            HumanMessage(content="I will provide you a to-do item to add my to-do list. What I want you to do is to create a longer and more comprehensive description for the to-do item. You can use the information in the to-do item to create a more detailed description. You can also add some additional information that you think is relevant to the to-do item."),
+            HumanMessage(content=desc),
+        ]
+    )
+    
+    return markdown_to_html(response.content)
+
 
 # pages
 @router.get("/todo-page",
@@ -138,6 +174,9 @@ async def create_todo(todo: ToDoRequest,
                              detail="User not authenticated")
     
     todo = ToDo(**todo, owner_id=user.get("id")) # .dict()
+    
+    todo.description = generate_description(todo.description)
+    
     db.add(todo)
     db.commit()
     db.refresh(todo)
