@@ -6,12 +6,9 @@ from pydantic import BaseModel, Field
 
 from models import Base, ToDo
 from database import engine, SessionLocal
-from routers.auth import router as auth_router
-from routers.todo import router as todo_router
 
 
 router = APIRouter(
-    prefix="/todo",
     tags=["Todo"],
 )
 

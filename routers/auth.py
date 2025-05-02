@@ -5,14 +5,22 @@ from fastapi import status
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from jose import jwt, JWTError
+from datetime import timedelta, datetime, timezone
+
+import os
+from dotenv import load_dotenv
 
 from models import Base, User
 from database import engine, SessionLocal
 
 # Configurations
 
+load_dotenv()
+JWT_SECRET_KEY  = os.getenv("JWT_SECRET_KEY")
+JWT_ALGORITHM   = os.getenv("JWT_ALGORITHM")
+
 router = APIRouter(
-    prefix="/auth", # ?? main.py'da mı burada mı tanımlanmalı?
     tags=["Authentication"],
 )
 
@@ -26,6 +34,7 @@ def get_db():
         db.close()
 
 db_dependency = Annotated[Session, Depends(get_db)]
+oauth_bearer = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 class CreateUserRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
@@ -34,6 +43,9 @@ class CreateUserRequest(BaseModel):
     last_name: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=100)
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 def authenticate_user(db: Session, 
                       username: str, 
@@ -44,6 +56,26 @@ def authenticate_user(db: Session,
     if not bcrypt_context.verify(password, user.hashed_password):
         return False
     return user
+
+def create_access_token(username:str, user_id:int, expire_time:timedelta):
+    payload = {"sub": username, 
+                 "user_id": user_id, 
+                 "exp": datetime.now(tz=timezone.utc) + expire_time}
+    encoded_jwt = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: Annotated[str, Depends(oauth_bearer)]):
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        username: str = payload.get("sub")
+        user_id: int = payload.get("user_id")
+        if username is None or user_id is None:
+            return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                 detail="Invalid token")
+        return {"username": username, "user_id": user_id}
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid token")
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)  
@@ -66,7 +98,9 @@ async def create_user(createUserRequest: CreateUserRequest,
 
 # when user tries to login, we will check if the user exists in the database
 # then return the token
-@router.post("/login", status_code=status.HTTP_200_OK)
+@router.post("/login", 
+             status_code=status.HTTP_200_OK,
+             response_model=Token)
 async def login_user(form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
                       db: db_dependency):
     
@@ -76,7 +110,12 @@ async def login_user(form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     if not user:
         return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, 
                              detail="Invalid credentials")
-    token = "fake-jwt-token"
+    
+    token = create_access_token(
+        username=user.username, 
+        user_id=user.id, 
+        expire_time=timedelta(minutes=30)
+    )
 
     return {
         "access_token": token,
