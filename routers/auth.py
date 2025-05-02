@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Path, HTTPException
+from fastapi import APIRouter, Depends, Path, HTTPException, Request
 from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import status
@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import jwt, JWTError
-from datetime import timedelta, datetime, timezone
+from fastapi.templating import Jinja2Templates
 
+from datetime import timedelta, datetime, timezone
 import os
 from dotenv import load_dotenv
 
@@ -19,6 +20,8 @@ from database import engine, SessionLocal
 load_dotenv()
 JWT_SECRET_KEY  = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM   = os.getenv("JWT_ALGORITHM")
+
+templates = Jinja2Templates(directory="templates")
 
 router = APIRouter(
     tags=["Authentication"],
@@ -76,6 +79,19 @@ def verify_token(token: Annotated[str, Depends(oauth_bearer)]):
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Invalid token")
+
+
+
+@router.get("/login-page")
+def render_login_page(request: Request):
+    return templates.TemplateResponse("login.html", 
+                                      {"request": request})
+
+
+@router.get("/register-page")
+def render_register_page(request: Request):
+    return templates.TemplateResponse("register.html", 
+                                      {"request": request})
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)  

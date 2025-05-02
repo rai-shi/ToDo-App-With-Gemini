@@ -1,3 +1,7 @@
 .env
 *.db
 notes.txt
+alembic.ini
+alembic/
+__pycache__/
+*.pyc
